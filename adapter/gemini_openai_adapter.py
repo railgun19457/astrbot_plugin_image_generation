@@ -145,9 +145,7 @@ class GeminiOpenAIAdapter(BaseImageAdapter):
             async with session.get(url, timeout=30) as response:
                 if response.status == 200:
                     return await response.read()
-                logger.error(
-                    f"[ImageGen] 下载图像失败: {response.status} - {url}"
-                )
+                logger.error(f"[ImageGen] 下载图像失败: {response.status} - {url}")
         except Exception as exc:  # noqa: BLE001
             logger.error(f"[ImageGen] 下载图像出错: {exc}")
         return None

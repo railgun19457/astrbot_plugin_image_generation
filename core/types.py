@@ -10,6 +10,8 @@ class AdapterType(str, enum.Enum):
     GEMINI = "gemini"
     GEMINI_OPENAI = "gemini(OpenAI)"
     GEMINI_ZAI = "gemini(Zai)"
+    OPENAI = "openai"
+    Z_IMAGE = "z-image(gitee)"
 
 
 @dataclass

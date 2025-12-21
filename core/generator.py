@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from astrbot.api import logger
 
-from ..adapter import GeminiAdapter, GeminiOpenAIAdapter, GeminiZaiAdapter
+from ..adapter import (
+    GeminiAdapter,
+    GeminiOpenAIAdapter,
+    GeminiZaiAdapter,
+    OpenAIAdapter,
+    ZImageAdapter,
+)
 from .types import (
     AdapterConfig,
     AdapterType,
@@ -26,6 +32,8 @@ class ImageGenerator:
             AdapterType.GEMINI: GeminiAdapter,
             AdapterType.GEMINI_OPENAI: GeminiOpenAIAdapter,
             AdapterType.GEMINI_ZAI: GeminiZaiAdapter,
+            AdapterType.OPENAI: OpenAIAdapter,
+            AdapterType.Z_IMAGE: ZImageAdapter,
         }
 
         adapter_cls = adapter_map.get(config.type)

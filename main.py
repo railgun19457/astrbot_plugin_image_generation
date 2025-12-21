@@ -25,21 +25,13 @@ from .core.generator import ImageGenerator
 from .core.types import AdapterConfig, AdapterType, GenerationRequest, ImageData
 from .core.utils import validate_aspect_ratio, validate_resolution
 
-# 默认支持的模型列表
-DEFAULT_MODELS = [
-    "gemini-2.0-flash-exp-image-generation",
-    "gemini-2.5-flash-image",
-    "gemini-2.5-flash-image-preview",
-    "gemini-3-pro-image-preview",
-]
-
 
 @pydantic_dataclass
 class ImageGenerationTool(FunctionTool[AstrAgentContext]):
     """LLM 可调用的图像生成工具。"""
 
-    name: str = "gemini_generate_image"
-    description: str = "使用 Gemini 模型生成或修改图片"
+    name: str = "generate_image"
+    description: str = "使用生图模型生成或修改图片"
     parameters: dict = Field(
         default_factory=lambda: {
             "type": "object",
@@ -51,7 +43,7 @@ class ImageGenerationTool(FunctionTool[AstrAgentContext]):
                 "aspect_ratio": {
                     "type": "string",
                     "description": "图片宽高比",
-                    "enum": list(DEFAULT_MODELS),  # 占位符，稍后会被替换
+                    "enum": [],  # 占位符，稍后会被替换
                 },
                 "resolution": {
                     "type": "string",
@@ -138,9 +130,7 @@ class ImageGenerationTool(FunctionTool[AstrAgentContext]):
                     avatar_data = await plugin.get_avatar(user_id)
                     if avatar_data:
                         images_data.append((avatar_data, "image/jpeg"))
-                        logger.info(
-                            f"[ImageGen] 已添加 {user_id} 的头像作为参考图"
-                        )
+                        logger.info(f"[ImageGen] 已添加 {user_id} 的头像作为参考图")
 
         # 生成任务 ID
         task_id = hashlib.md5(
@@ -231,8 +221,6 @@ class ImageGenerationPlugin(Star):
                 base_url = loaded_base
 
         available_models = adapter_cfg.get("available_models") or []
-        if not available_models:
-            available_models = DEFAULT_MODELS
 
         model = adapter_cfg.get("model") or (
             available_models[0] if available_models else ""
@@ -258,7 +246,7 @@ class ImageGenerationPlugin(Star):
         self.presets = self._load_presets(self.config.get("presets", []))
 
     def _clean_base_url(self, url: str) -> str:
-        """清理 Base URL，移除末尾的 /v1。"""
+        """清理 Base URL，移除末尾的 /v1*"""
         if not url:
             return ""
         url = url.rstrip("/")
@@ -410,7 +398,7 @@ class ImageGenerationPlugin(Star):
             yield event.plain_result("❌ 适配器未初始化")
             return
 
-        models = self.adapter_config.available_models or DEFAULT_MODELS
+        models = self.adapter_config.available_models or []
 
         if not model_index:
             lines = ["📋 可用模型列表:"]

@@ -18,7 +18,9 @@
         "options": [
           "gemini",
           "gemini(OpenAI)",
-          "gemini(Zai)"
+          "gemini(Zai)",
+          "openai",
+          "z-image(gitee)"
         ]
       },
       "provider_id": {
