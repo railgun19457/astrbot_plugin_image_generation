@@ -7,11 +7,19 @@ from typing import Any
 from astrbot.api import logger
 
 from ..core.base_adapter import BaseImageAdapter
-from ..core.types import GenerationRequest, GenerationResult
+from ..core.types import GenerationRequest, GenerationResult, ImageCapability
 
 
 class ZImageAdapter(BaseImageAdapter):
     """Gitee AI 图像生成适配器 (z-image-turbo)。"""
+
+    def get_capabilities(self) -> ImageCapability:
+        """获取适配器支持的功能。"""
+        return (
+            ImageCapability.TEXT_TO_IMAGE
+            | ImageCapability.RESOLUTION
+            | ImageCapability.ASPECT_RATIO
+        )
 
     async def generate(self, request: GenerationRequest) -> GenerationResult:
         """执行生图逻辑。"""

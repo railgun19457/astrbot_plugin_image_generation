@@ -7,11 +7,15 @@ from typing import Any
 from astrbot.api import logger
 
 from ..core.base_adapter import BaseImageAdapter
-from ..core.types import GenerationRequest, GenerationResult
+from ..core.types import GenerationRequest, GenerationResult, ImageCapability
 
 
 class OpenAIAdapter(BaseImageAdapter):
     """标准 OpenAI 图像生成适配器 (DALL-E)。"""
+
+    def get_capabilities(self) -> ImageCapability:
+        """获取适配器支持的功能。"""
+        return ImageCapability.TEXT_TO_IMAGE | ImageCapability.ASPECT_RATIO
 
     async def generate(self, request: GenerationRequest) -> GenerationResult:
         """执行生图逻辑。"""

@@ -10,13 +10,17 @@ import aiohttp
 from astrbot.api import logger
 
 from ..core.base_adapter import BaseImageAdapter
-from ..core.types import GenerationRequest, GenerationResult
+from ..core.types import GenerationRequest, GenerationResult, ImageCapability
 
 
 class GeminiOpenAIAdapter(BaseImageAdapter):
     """通过 OpenAI 兼容的聊天补全接口进行 Gemini 图像生成。"""
 
     DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
+
+    def get_capabilities(self) -> ImageCapability:
+        """获取适配器支持的功能。"""
+        return ImageCapability.TEXT_TO_IMAGE | ImageCapability.IMAGE_TO_IMAGE
 
     async def generate(self, request: GenerationRequest) -> GenerationResult:
         """执行生图逻辑。"""

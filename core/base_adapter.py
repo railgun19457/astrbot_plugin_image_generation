@@ -6,7 +6,7 @@ import aiohttp
 
 from astrbot.api import logger
 
-from .types import AdapterConfig, GenerationRequest, GenerationResult
+from .types import AdapterConfig, GenerationRequest, GenerationResult, ImageCapability
 
 
 class BaseImageAdapter(abc.ABC):
@@ -23,6 +23,10 @@ class BaseImageAdapter(abc.ABC):
         self.max_retry_attempts = max(1, config.max_retry_attempts)
         self.safety_settings = config.safety_settings
         self._session: aiohttp.ClientSession | None = None
+
+    @abc.abstractmethod
+    def get_capabilities(self) -> ImageCapability:
+        """获取适配器支持的功能。"""
 
     async def close(self) -> None:
         """关闭底层的 HTTP 会话。"""

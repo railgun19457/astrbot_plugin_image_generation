@@ -22,7 +22,13 @@ from astrbot.core.config.astrbot_config import AstrBotConfig
 from astrbot.core.utils.io import download_image_by_url, save_temp_img
 
 from .core.generator import ImageGenerator
-from .core.types import AdapterConfig, AdapterType, GenerationRequest, ImageData
+from .core.types import (
+    AdapterConfig,
+    AdapterType,
+    GenerationRequest,
+    ImageCapability,
+    ImageData,
+)
 from .core.utils import validate_aspect_ratio, validate_resolution
 
 
@@ -110,27 +116,35 @@ class ImageGenerationTool(FunctionTool[AstrAgentContext]):
             return "❌ 未配置 API Key，无法生成图片"
 
         # 工具调用同样支持获取上下文参考图（消息/引用/头像）
-        images_data = await plugin._get_reference_images_for_tool(event)
+        images_data = []
+        capabilities = (
+            plugin.generator.adapter.get_capabilities()
+            if plugin.generator and plugin.generator.adapter
+            else ImageCapability.NONE
+        )
 
-        # 处理头像引用参数
-        avatar_refs = kwargs.get("avatar_references", [])
-        if avatar_refs and isinstance(avatar_refs, list):
-            for ref in avatar_refs:
-                if not isinstance(ref, str):
-                    continue
-                ref = ref.strip().lower()
-                user_id = None
-                if ref == "self":
-                    user_id = str(event.get_self_id())
-                elif ref == "sender":
-                    user_id = str(event.get_sender_id() or event.unified_msg_origin)
-                else:
-                    user_id = ref
-                if user_id:
-                    avatar_data = await plugin.get_avatar(user_id)
-                    if avatar_data:
-                        images_data.append((avatar_data, "image/jpeg"))
-                        logger.info(f"[ImageGen] 已添加 {user_id} 的头像作为参考图")
+        if capabilities & ImageCapability.IMAGE_TO_IMAGE:
+            images_data = await plugin._get_reference_images_for_tool(event)
+
+            # 处理头像引用参数
+            avatar_refs = kwargs.get("avatar_references", [])
+            if avatar_refs and isinstance(avatar_refs, list):
+                for ref in avatar_refs:
+                    if not isinstance(ref, str):
+                        continue
+                    ref = ref.strip().lower()
+                    user_id = None
+                    if ref == "self":
+                        user_id = str(event.get_self_id())
+                    elif ref == "sender":
+                        user_id = str(event.get_sender_id() or event.unified_msg_origin)
+                    else:
+                        user_id = ref
+                    if user_id:
+                        avatar_data = await plugin.get_avatar(user_id)
+                        if avatar_data:
+                            images_data.append((avatar_data, "image/jpeg"))
+                            logger.info(f"[ImageGen] 已添加 {user_id} 的头像作为参考图")
 
         # 生成任务 ID
         task_id = hashlib.md5(
@@ -187,12 +201,37 @@ class ImageGenerationPlugin(Star):
             logger.error("[ImageGen] 适配器配置加载失败，插件未初始化")
 
         if self.enable_llm_tool and self.generator:
-            self.context.add_llm_tools(ImageGenerationTool(plugin=self))
+            tool = ImageGenerationTool(plugin=self)
+            self._adjust_tool_parameters(tool)
+            self.context.add_llm_tools(tool)
             logger.info("[ImageGen] 已注册图像生成工具")
 
         logger.info(
             f"[ImageGen] 插件加载完成，模型: {self.adapter_config.model if self.adapter_config else '未知'}"
         )
+
+    def _adjust_tool_parameters(self, tool: ImageGenerationTool):
+        """根据适配器能力动态调整工具参数。"""
+        if not self.generator or not self.generator.adapter:
+            return
+
+        capabilities = self.generator.adapter.get_capabilities()
+        props = tool.parameters["properties"]
+
+        if not (capabilities & ImageCapability.ASPECT_RATIO):
+            if "aspect_ratio" in props:
+                del props["aspect_ratio"]
+                logger.debug("[ImageGen] 适配器不支持宽高比，已从工具参数中移除")
+
+        if not (capabilities & ImageCapability.RESOLUTION):
+            if "resolution" in props:
+                del props["resolution"]
+                logger.debug("[ImageGen] 适配器不支持分辨率，已从工具参数中移除")
+
+        if not (capabilities & ImageCapability.IMAGE_TO_IMAGE):
+            if "avatar_references" in props:
+                del props["avatar_references"]
+                logger.debug("[ImageGen] 适配器不支持参考图，已从工具参数中移除头像引用")
 
     # ---------------------------- 配置加载 -----------------------------
     def _load_config(self) -> None:
@@ -369,7 +408,16 @@ class ImageGenerationPlugin(Star):
             return
 
         # 获取参考图
-        images_data = await self._get_reference_images_for_command(event)
+        images_data = None
+        if (
+            self.generator
+            and self.generator.adapter
+            and (
+                self.generator.adapter.get_capabilities()
+                & ImageCapability.IMAGE_TO_IMAGE
+            )
+        ):
+            images_data = await self._get_reference_images_for_command(event)
 
         msg = "已开始生图任务"
         if images_data:
@@ -610,8 +658,25 @@ class ImageGenerationPlugin(Star):
         task_id: str | None = None,
     ) -> None:
         """异步生成图片并发送。"""
-        if not self.generator:
+        if not self.generator or not self.generator.adapter:
             return
+
+        capabilities = self.generator.adapter.get_capabilities()
+
+        # 检查并清理不支持的参数
+        if not (capabilities & ImageCapability.IMAGE_TO_IMAGE) and images_data:
+            logger.warning(
+                f"[ImageGen] 当前适配器不支持参考图，已忽略 {len(images_data)} 张图片"
+            )
+            images_data = None
+
+        if not (capabilities & ImageCapability.ASPECT_RATIO) and aspect_ratio != "自动":
+            logger.info(f"[ImageGen] 当前适配器不支持指定比例，已忽略参数: {aspect_ratio}")
+            aspect_ratio = "自动"
+
+        if not (capabilities & ImageCapability.RESOLUTION) and resolution != "1K":
+            logger.info(f"[ImageGen] 当前适配器不支持指定分辨率，已忽略参数: {resolution}")
+            resolution = "1K"
 
         if not task_id:
             task_id = hashlib.md5(

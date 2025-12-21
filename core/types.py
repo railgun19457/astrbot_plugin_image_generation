@@ -14,13 +14,22 @@ class AdapterType(str, enum.Enum):
     Z_IMAGE = "z-image(gitee)"
 
 
+class ImageCapability(enum.Flag):
+    """图像生成适配器支持的功能。"""
+
+    NONE = 0
+    TEXT_TO_IMAGE = enum.auto()  # 文生图
+    IMAGE_TO_IMAGE = enum.auto()  # 图生图
+    RESOLUTION = enum.auto()  # 指定分辨率
+    ASPECT_RATIO = enum.auto()  # 指定宽高比
+
+
 @dataclass
 class AdapterMetadata:
     """关于适配器能力的元数据。"""
 
     name: str
-    supports_aspect_ratio: bool = True
-    supports_resolution: bool = True
+    capabilities: ImageCapability = ImageCapability.TEXT_TO_IMAGE
 
 
 @dataclass
