@@ -3,8 +3,6 @@ from __future__ import annotations
 import asyncio
 import base64
 
-import aiohttp
-
 from astrbot.api import logger
 
 from ..core.base_adapter import BaseImageAdapter
@@ -71,32 +69,32 @@ class Jimeng2APIAdapter(BaseImageAdapter):
 
         try:
             if request.images:
-                # 图生图
+                # 图生图：改为 JSON，images 作为 data URL（服务端声明只接受 URL 或本地文件）
                 url = f"{base_url.rstrip('/')}/v1/images/compositions"
+                headers["Content-Type"] = "application/json"
 
-                # 使用 multipart/form-data
-                data = aiohttp.FormData()
-                data.add_field("model", self.model or "jimeng-4.5")
-                data.add_field("prompt", prompt_text)
+                images_as_urls: list[str] = []
+                for img in request.images:
+                    mime = img.mime_type or "image/jpeg"
+                    b64 = base64.b64encode(img.data).decode("ascii")
+                    images_as_urls.append(f"data:{mime};base64,{b64}")
+
+                payload: dict[str, object] = {
+                    "model": self.model or "jimeng-4.5",
+                    "prompt": prompt_text,
+                    "images": images_as_urls,
+                }
                 if request.aspect_ratio:
                     if request.aspect_ratio == "自动":
-                        data.add_field("intelligent_ratio", "true")
+                        payload["intelligent_ratio"] = True
                     else:
-                        data.add_field("ratio", request.aspect_ratio)
+                        payload["ratio"] = request.aspect_ratio
                 if request.resolution:
-                    data.add_field("resolution", request.resolution.lower())
-
-                for img in request.images:
-                    data.add_field(
-                        "images",
-                        img.data,
-                        filename=f"image.{img.mime_type.split('/')[-1]}",
-                        content_type=img.mime_type,
-                    )
+                    payload["resolution"] = request.resolution.lower()
 
                 async with session.post(
                     url,
-                    data=data,
+                    json=payload,
                     headers=headers,
                     proxy=self.proxy,
                     timeout=self.timeout,
