@@ -78,23 +78,11 @@
         "type": "int",
         "default": 3
       },
-      "rate_limit_seconds": {
-        "description": "速率限制（秒）",
-        "hint": "单个用户两次请求之间的最小间隔时间，0 表示不限制",
-        "type": "int",
-        "default": 0
-      },
       "max_concurrent_tasks": {
         "description": "最大并发任务数",
         "hint": "同时生成图片的最大数量，防止资源耗尽",
         "type": "int",
         "default": 3
-      },
-      "max_image_size_mb": {
-        "description": "最大图片限制 (MB)",
-        "hint": "允许上传的参考图最大大小，超过此大小的图片将被忽略",
-        "type": "int",
-        "default": 10
       },
       "default_aspect_ratio": {
         "description": "默认宽高比",
@@ -131,6 +119,56 @@
         "hint": "生图成功后，发送消息展示生图耗时和生成图片数量",
         "type": "bool",
         "default": false
+      }
+    }
+  },
+  "user_limits": {
+    "description": "用户限制配置",
+    "hint": "针对用户的生图限制",
+    "type": "object",
+    "items": {
+      "rate_limit_seconds": {
+        "description": "速率限制（秒）",
+        "hint": "单个用户两次请求之间的最小间隔时间，0 表示不限制",
+        "type": "int",
+        "default": 0
+      },
+      "max_image_size_mb": {
+        "description": "最大图片限制 (MB)",
+        "hint": "允许上传的参考图最大大小，超过此大小的图片将被忽略",
+        "type": "int",
+        "default": 10
+      },
+      "enable_daily_limit": {
+        "description": "启用每日生图数量限制",
+        "hint": "开启后将限制每个用户每日生成的图片数量",
+        "type": "bool",
+        "default": false
+      },
+      "daily_limit_count": {
+        "description": "每日生图数量限制次数",
+        "hint": "每个用户每日允许生成的最大图片数量",
+        "type": "int",
+        "default": 10
+      }
+    }
+  },
+  "cache": {
+    "description": "缓存配置",
+    "hint": "图片缓存管理配置",
+    "type": "object",
+    "items": {
+      "max_cache_count": {
+        "description": "最大缓存图片数量",
+        "hint": "超过此数量将清理旧图片",
+        "type": "int",
+        "default": 100
+      },
+      "cleanup_interval_hours": {
+        "description": "定时清理间隔 (小时)",
+        "hint": "每隔多少小时清理一次缓存",
+        "type": "int",
+        "default": 24
       }
     }
   },

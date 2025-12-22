@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import hashlib
 import json
 import os
@@ -19,7 +20,7 @@ from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.tool import FunctionTool, ToolExecResult
 from astrbot.core.astr_agent_context import AstrAgentContext
 from astrbot.core.config.astrbot_config import AstrBotConfig
-from astrbot.core.utils.io import download_image_by_url, save_temp_img
+from astrbot.core.utils.io import download_image_by_url
 
 from .core.generator import ImageGenerator
 from .core.types import (
@@ -112,6 +113,11 @@ class ImageGenerationTool(FunctionTool[AstrAgentContext]):
             )
             return "❌ 无法获取当前消息上下文"
 
+        # 检查频率限制和每日限制
+        check_result = plugin._check_rate_limit(event.unified_msg_origin)
+        if isinstance(check_result, str):
+            return check_result
+
         if not plugin.adapter_config.api_keys:
             return "❌ 未配置 API Key，无法生成图片"
 
@@ -185,12 +191,23 @@ class ImageGenerationPlugin(Star):
         # 并发控制信号量
         self.semaphore: asyncio.Semaphore | None = None
 
+        self.data_dir = "data/plugin_data/astrbot_plugin_gemini_generation"
+        self.cache_dir = os.path.join(self.data_dir, "cache")
+        self.usage_file = os.path.join(self.data_dir, "usage.json")
+        self.usage_data: dict[str, dict[str, int]] = {}  # {date: {user_id: count}}
+        self._ensure_dirs()
+        self._load_usage_data()
+
         self.enable_llm_tool = True
         self.default_aspect_ratio = "自动"
         self.default_resolution = "1K"
         self.max_image_size_mb = 10
         self.presets: dict[str, Any] = {}
         self.rate_limit_seconds = 0
+        self.enable_daily_limit = False
+        self.daily_limit_count = 10
+        self.max_cache_count = 100
+        self.cleanup_interval_hours = 24
 
         self._load_config()
 
@@ -206,9 +223,85 @@ class ImageGenerationPlugin(Star):
             self.context.add_llm_tools(tool)
             logger.info("[ImageGen] 已注册图像生成工具")
 
+        # 启动定时清理任务
+        self.create_background_task(self._cache_cleanup_loop())
+
         logger.info(
             f"[ImageGen] 插件加载完成，模型: {self.adapter_config.model if self.adapter_config else '未知'}"
         )
+
+    def _ensure_dirs(self):
+        """确保数据和缓存目录存在。"""
+        os.makedirs(self.cache_dir, exist_ok=True)
+
+    def _load_usage_data(self):
+        """加载用户使用数据。"""
+        if os.path.exists(self.usage_file):
+            try:
+                with open(self.usage_file, encoding="utf-8") as f:
+                    self.usage_data = json.load(f)
+
+                # 清理旧数据，只保留最近 7 天
+                today = datetime.date.today()
+                keys_to_delete = []
+                for date_str in self.usage_data:
+                    try:
+                        date_obj = datetime.date.fromisoformat(date_str)
+                        if (today - date_obj).days > 7:
+                            keys_to_delete.append(date_str)
+                    except ValueError:
+                        keys_to_delete.append(date_str)
+
+                if keys_to_delete:
+                    for key in keys_to_delete:
+                        del self.usage_data[key]
+                    self._save_usage_data()
+            except Exception as exc:
+                logger.error(f"[ImageGen] 加载使用数据失败: {exc}")
+                self.usage_data = {}
+
+    def _save_usage_data(self):
+        """保存用户使用数据。"""
+        try:
+            with open(self.usage_file, "w", encoding="utf-8") as f:
+                json.dump(self.usage_data, f, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            logger.error(f"[ImageGen] 保存使用数据失败: {exc}")
+
+    async def _cache_cleanup_loop(self):
+        """定时清理缓存的任务。"""
+        while True:
+            try:
+                await self._cleanup_cache()
+            except Exception as exc:
+                logger.error(f"[ImageGen] 清理缓存出错: {exc}")
+
+            # 等待指定的间隔时间
+            await asyncio.sleep(self.cleanup_interval_hours * 3600)
+
+    async def _cleanup_cache(self):
+        """执行缓存清理。"""
+        if not os.path.exists(self.cache_dir):
+            return
+
+        files = []
+        for f in os.listdir(self.cache_dir):
+            path = os.path.join(self.cache_dir, f)
+            if os.path.isfile(path):
+                files.append((path, os.path.getmtime(path)))
+
+        # 按修改时间排序（旧的在前）
+        files.sort(key=lambda x: x[1])
+
+        # 按数量清理
+        if len(files) > self.max_cache_count:
+            to_delete = files[: len(files) - self.max_cache_count]
+            for path, _ in to_delete:
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+            logger.info(f"[ImageGen] 已清理 {len(to_delete)} 个旧缓存文件 (按数量)")
 
     def _adjust_tool_parameters(self, tool: ImageGenerationTool):
         """根据适配器能力动态调整工具参数。"""
@@ -240,6 +333,8 @@ class ImageGenerationPlugin(Star):
         """加载插件配置。"""
         adapter_cfg = self.config.get("adapter", {})
         gen_cfg = self.config.get("generation", {})
+        user_limits_cfg = self.config.get("user_limits", {})
+        cache_cfg = self.config.get("cache", {})
 
         self.enable_llm_tool = self.config.get("enable_llm_tool", True)
 
@@ -284,9 +379,17 @@ class ImageGenerationPlugin(Star):
             max_retry_attempts=gen_cfg.get("max_retry_attempts", 3),
         )
 
-        self.rate_limit_seconds = max(0, gen_cfg.get("rate_limit_seconds", 0))
+        self.rate_limit_seconds = max(0, user_limits_cfg.get("rate_limit_seconds", 0))
         self.max_concurrent_tasks = max(1, gen_cfg.get("max_concurrent_tasks", 3))
-        self.max_image_size_mb = max(1, gen_cfg.get("max_image_size_mb", 10))
+        self.max_image_size_mb = max(1, user_limits_cfg.get("max_image_size_mb", 10))
+        self.enable_daily_limit = user_limits_cfg.get("enable_daily_limit", False)
+        self.daily_limit_count = max(1, user_limits_cfg.get("daily_limit_count", 10))
+
+        self.max_cache_count = max(1, cache_cfg.get("max_cache_count", 100))
+        self.cleanup_interval_hours = max(
+            1, cache_cfg.get("cleanup_interval_hours", 24)
+        )
+
         self.default_aspect_ratio = gen_cfg.get("default_aspect_ratio", "自动")
         self.default_resolution = gen_cfg.get("default_resolution", "1K")
         self.show_generation_info = gen_cfg.get("show_generation_info", False)
@@ -349,12 +452,10 @@ class ImageGenerationPlugin(Star):
         """处理生图指令。"""
         user_id = event.unified_msg_origin
 
-        # 检查频率限制
-        if not self._check_rate_limit(user_id):
-            if self.rate_limit_seconds > 0:
-                yield event.plain_result(
-                    f"❌ 请求过于频繁，请间隔 {self.rate_limit_seconds} 秒再试"
-                )
+        # 检查频率限制和每日限制
+        check_result = self._check_rate_limit(user_id)
+        if isinstance(check_result, str):
+            yield event.plain_result(check_result)
             return
 
         masked_uid = (
@@ -569,15 +670,27 @@ class ImageGenerationPlugin(Star):
                 pass
         return None, model_str
 
-    def _check_rate_limit(self, user_id: str) -> bool:
-        """检查用户请求频率限制。"""
-        if self.rate_limit_seconds <= 0:
-            return True
-        now = time.time()
-        last_ts = self.user_request_timestamps.get(user_id, 0)
-        if now - last_ts < self.rate_limit_seconds:
-            return False
-        self.user_request_timestamps[user_id] = now
+    def _check_rate_limit(self, user_id: str) -> bool | str:
+        """检查用户请求频率限制和每日限制。"""
+        # 1. 检查频率限制
+        if self.rate_limit_seconds > 0:
+            now = time.time()
+            last_ts = self.user_request_timestamps.get(user_id, 0)
+            if now - last_ts < self.rate_limit_seconds:
+                remaining = int(self.rate_limit_seconds - (now - last_ts))
+                return f"❌ 请求过于频繁，请在 {remaining} 秒后再试"
+            self.user_request_timestamps[user_id] = now
+
+        # 2. 检查每日限制
+        if self.enable_daily_limit:
+            today = datetime.date.today().isoformat()
+            if today not in self.usage_data:
+                self.usage_data[today] = {}
+
+            count = self.usage_data[today].get(user_id, 0)
+            if count >= self.daily_limit_count:
+                return f"❌ 您今日的生图额度已用完 ({self.daily_limit_count}次)，请明天再试"
+
         return True
 
     async def _fetch_images_from_event(
@@ -651,12 +764,14 @@ class ImageGenerationPlugin(Star):
         task.add_done_callback(self.background_tasks.discard)
         return task
 
-    @staticmethod
-    async def get_avatar(user_id: str) -> bytes | None:
+    async def get_avatar(self, user_id: str) -> bytes | None:
         """获取用户头像。"""
         url = f"https://q4.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640"
         try:
-            path = await download_image_by_url(url)
+            # 使用插件缓存目录
+            file_name = f"avatar_{user_id}.jpg"
+            path = os.path.join(self.cache_dir, file_name)
+            path = await download_image_by_url(url, path=path)
             if path:
                 with open(path, "rb") as f:
                     return f.read()
@@ -672,7 +787,10 @@ class ImageGenerationPlugin(Star):
                 with open(url, "rb") as f:
                     data = f.read()
             else:
-                path = await download_image_by_url(url)
+                # 使用插件缓存目录
+                file_name = f"ref_{hashlib.md5(url.encode()).hexdigest()[:10]}"
+                path = os.path.join(self.cache_dir, file_name)
+                path = await download_image_by_url(url, path=path)
                 if path:
                     with open(path, "rb") as f:
                         data = f.read()
@@ -694,7 +812,7 @@ class ImageGenerationPlugin(Star):
             elif data.startswith(b"RIFF") and b"WEBP" in data[:16]:
                 mime = "image/webp"
             return data, mime
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error(f"[ImageGen] 获取图片失败 (URL/Path: {url}): {exc}")
         return None
 
@@ -799,18 +917,41 @@ class ImageGenerationPlugin(Star):
         if not result.images:
             return
 
+        # 记录使用次数
+        if self.enable_daily_limit:
+            today = datetime.date.today().isoformat()
+            if today not in self.usage_data:
+                self.usage_data[today] = {}
+            self.usage_data[today][unified_msg_origin] = (
+                self.usage_data[today].get(unified_msg_origin, 0) + 1
+            )
+            self._save_usage_data()
+
         chain = MessageChain()
         for img_bytes in result.images:
             try:
-                file_path = save_temp_img(img_bytes)
+                # 保存到插件自定义缓存目录
+                file_name = f"gen_{task_id}_{int(time.time())}_{hashlib.md5(img_bytes).hexdigest()[:6]}.png"
+                file_path = os.path.join(self.cache_dir, file_name)
+                with open(file_path, "wb") as f:
+                    f.write(img_bytes)
                 chain.file_image(file_path)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.error(f"[ImageGen] 保存图片失败: {exc}")
 
+        info_parts = []
         if self.show_generation_info:
-            chain.message(
-                f"\n✨ 生成成功！\n📊 耗时: {duration:.2f}s\n🖼️ 数量: {len(result.images)}张"
+            info_parts.append(
+                f"✨ 生成成功！\n📊 耗时: {duration:.2f}s\n🖼️ 数量: {len(result.images)}张"
             )
+
+        if self.enable_daily_limit:
+            today = datetime.date.today().isoformat()
+            count = self.usage_data.get(today, {}).get(unified_msg_origin, 0)
+            info_parts.append(f"📅 今日用量: {count}/{self.daily_limit_count}")
+
+        if info_parts:
+            chain.message("\n" + "\n".join(info_parts))
 
         await self.context.send_message(unified_msg_origin, chain)
 
@@ -823,5 +964,5 @@ class ImageGenerationPlugin(Star):
                 if not task.done():
                     task.cancel()
             logger.info("[ImageGen] 插件已卸载")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error(f"[ImageGen] 卸载清理出错: {exc}")
