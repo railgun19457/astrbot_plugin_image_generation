@@ -208,6 +208,7 @@ class ImageGenerationPlugin(Star):
         self.daily_limit_count = 10
         self.max_cache_count = 100
         self.cleanup_interval_hours = 24
+        self.show_model_info = False
 
         self._load_config()
 
@@ -331,53 +332,104 @@ class ImageGenerationPlugin(Star):
     # ---------------------------- 配置加载 -----------------------------
     def _load_config(self) -> None:
         """加载插件配置。"""
-        adapter_cfg = self.config.get("adapter", {})
         gen_cfg = self.config.get("generation", {})
         user_limits_cfg = self.config.get("user_limits", {})
         cache_cfg = self.config.get("cache", {})
+        api_providers_raw = self.config.get("api_providers", [])
 
         self.enable_llm_tool = self.config.get("enable_llm_tool", True)
 
-        adapter_type_raw = adapter_cfg.get("type", "gemini")
-        try:
-            adapter_type = AdapterType(adapter_type_raw)
-        except Exception:
-            adapter_type = AdapterType.GEMINI
+        # 1. 收集所有供应商配置
+        all_provider_configs: list[AdapterConfig] = []
+        for provider_item in api_providers_raw:
+            if not isinstance(provider_item, dict):
+                continue
 
-        base_url = (adapter_cfg.get("base_url") or "").strip()
-        api_keys: list[str] = [k for k in adapter_cfg.get("api_keys", []) if k]
-        provider_id = (adapter_cfg.get("provider_id") or "").strip()
+            # 这里的 provider_item 是 template_list 的一个项
+            # AstrBot 的 template_list 项结构通常是：
+            # {
+            #    "__template_key": "gemini",
+            #    "name": "...",
+            #    "provider_id": "...",
+            #    ...其他 items 中的字段
+            # }
+            adapter_type_str = provider_item.get("__template_key")
+            if not adapter_type_str:
+                continue
 
-        # 如果配置了 provider_id，尝试从系统提供商加载配置
-        if provider_id:
-            loaded_keys, loaded_base = self._load_provider_config(provider_id)
-            if loaded_keys:
-                api_keys = loaded_keys
-            if loaded_base:
-                base_url = loaded_base
+            try:
+                adapter_type = AdapterType(adapter_type_str)
+            except ValueError:
+                logger.warning(f"[ImageGen] 忽略未知适配器类型: {adapter_type_str}")
+                continue
 
-        available_models = adapter_cfg.get("available_models") or []
+            name = provider_item.get("name", "")
+            base_url = (provider_item.get("base_url") or "").strip()
+            api_keys = [k for k in provider_item.get("api_keys", []) if k]
+            provider_id = (provider_item.get("provider_id") or "").strip()
+            available_models = provider_item.get("available_models") or []
+            proxy = (provider_item.get("proxy") or "").strip() or None
 
-        model_raw = adapter_cfg.get("model") or (
-            available_models[0] if available_models else ""
-        )
+            # 如果配置了 provider_id，从系统提供商加载
+            if provider_id:
+                loaded_keys, loaded_base = self._load_provider_config(provider_id)
+                if loaded_keys:
+                    api_keys = loaded_keys
+                if loaded_base:
+                    base_url = loaded_base
 
-        # 解析模型设置，支持 adapter/model 格式
-        parsed_adapter_type, model = self._parse_model_setting(model_raw)
-        if parsed_adapter_type:
-            adapter_type = parsed_adapter_type
+            all_provider_configs.append(
+                AdapterConfig(
+                    type=adapter_type,
+                    name=name,
+                    base_url=self._clean_base_url(base_url),
+                    api_keys=api_keys,
+                    available_models=available_models,
+                    provider_id=provider_id,
+                    proxy=proxy,
+                    timeout=gen_cfg.get("timeout", 180),
+                    max_retry_attempts=gen_cfg.get("max_retry_attempts", 3),
+                )
+            )
 
-        self.adapter_config = AdapterConfig(
-            type=adapter_type,
-            base_url=self._clean_base_url(base_url),
-            api_keys=api_keys,
-            model=model,
-            available_models=available_models,
-            provider_id=provider_id,
-            proxy=(adapter_cfg.get("proxy") or "").strip() or None,
-            timeout=gen_cfg.get("timeout", 180),
-            max_retry_attempts=gen_cfg.get("max_retry_attempts", 3),
-        )
+        # 2. 获取当前选择的模型
+        model_setting = gen_cfg.get("model", "")
+
+        # 3. 匹配当前适配器
+        matched_config = None
+        current_model = ""
+
+        if "/" in model_setting:
+            target_provider_name, target_model = model_setting.split("/", 1)
+            for cfg in all_provider_configs:
+                if cfg.name == target_provider_name:
+                    matched_config = cfg
+                    current_model = target_model
+                    break
+
+        # 如果没匹配到（或者没设置），取第一个可用的
+        if not matched_config and all_provider_configs:
+            matched_config = all_provider_configs[0]
+            current_model = (
+                matched_config.available_models[0]
+                if matched_config.available_models
+                else ""
+            )
+            logger.info(
+                f"[ImageGen] 未匹配到当前模型配置，默认使用: {matched_config.name}/{current_model}"
+            )
+
+        if matched_config:
+            self.adapter_config = matched_config
+            self.adapter_config.model = current_model
+            # 将所有可用模型汇总，供切换指令使用，格式为 "供应商名称/模型名称"
+            all_available_models = []
+            for cfg in all_provider_configs:
+                for m in cfg.available_models:
+                    all_available_models.append(f"{cfg.name}/{m}")
+            self.adapter_config.available_models = all_available_models
+        else:
+            self.adapter_config = None
 
         self.rate_limit_seconds = max(0, user_limits_cfg.get("rate_limit_seconds", 0))
         self.max_concurrent_tasks = max(1, gen_cfg.get("max_concurrent_tasks", 3))
@@ -393,6 +445,7 @@ class ImageGenerationPlugin(Star):
         self.default_aspect_ratio = gen_cfg.get("default_aspect_ratio", "自动")
         self.default_resolution = gen_cfg.get("default_resolution", "1K")
         self.show_generation_info = gen_cfg.get("show_generation_info", False)
+        self.show_model_info = gen_cfg.get("show_model_info", False)
 
         self.presets = self._load_presets(self.config.get("presets", []))
 
@@ -560,47 +613,29 @@ class ImageGenerationPlugin(Star):
 
         if not model_index:
             lines = ["📋 可用模型列表:"]
-            for idx, model in enumerate(models, 1):
-                # 检查是否匹配当前配置
-                at, m = self._parse_model_setting(model)
-                is_current = False
-                if at:
-                    is_current = (
-                        at == self.adapter_config.type
-                        and m == self.adapter_config.model
-                    )
-                else:
-                    is_current = model == self.adapter_config.model
-
-                marker = " ✓" if is_current else ""
-                lines.append(f"{idx}. {model}{marker}")
-            lines.append(
-                f"\n当前使用: {self.adapter_config.model} ({self.adapter_config.type.value})"
+            current_model_full = (
+                f"{self.adapter_config.name}/{self.adapter_config.model}"
             )
+            for idx, model in enumerate(models, 1):
+                marker = " ✓" if model == current_model_full else ""
+                lines.append(f"{idx}. {model}{marker}")
+            lines.append(f"\n当前使用: {current_model_full}")
             yield event.plain_result("\n".join(lines))
             return
 
         try:
             index = int(model_index) - 1
             if 0 <= index < len(models):
-                raw_model = models[index]
+                raw_model = models[index]  # "供应商名称/模型名称"
 
-                adapter_type, model_name = self._parse_model_setting(raw_model)
-
-                if adapter_type:
-                    self.adapter_config.type = adapter_type
-                    self.config.setdefault("adapter", {})["type"] = adapter_type.value
-
-                self.adapter_config.model = model_name
-                self.config.setdefault("adapter", {})["model"] = model_name
+                # 更新配置并重新加载
+                self.config.setdefault("generation", {})["model"] = raw_model
+                self.config.save_config()
+                self._load_config()
 
                 if self.generator:
-                    if adapter_type:
-                        self.generator.update_adapter(self.adapter_config)
-                    else:
-                        self.generator.update_model(model_name)
+                    self.generator.update_adapter(self.adapter_config)
 
-                self.config.save_config()
                 yield event.plain_result(f"✅ 模型已切换: {raw_model}")
             else:
                 yield event.plain_result("❌ 无效的序号")
@@ -654,22 +689,6 @@ class ImageGenerationPlugin(Star):
                 yield event.plain_result(f"❌ 预设不存在: {name}")
 
     # ----------------------------- 辅助方法 ---------------------------
-    def _parse_model_setting(self, model_str: str) -> tuple[AdapterType | None, str]:
-        """解析模型设置字符串，支持 'adapter/model' 格式。"""
-        if "/" in model_str:
-            adapter_part, model_part = model_str.split("/", 1)
-            adapter_part = adapter_part.strip().lower()
-            # 尝试匹配 AdapterType
-            for at in AdapterType:
-                if at.value.lower() == adapter_part:
-                    return at, model_part.strip()
-            # 如果没匹配到，可能用户写的是 enum name 或者其他
-            try:
-                return AdapterType(adapter_part), model_part.strip()
-            except ValueError:
-                pass
-        return None, model_str
-
     def _check_rate_limit(self, user_id: str) -> bool | str:
         """检查用户请求频率限制和每日限制。"""
         # 1. 检查频率限制
@@ -943,6 +962,11 @@ class ImageGenerationPlugin(Star):
         if self.show_generation_info:
             info_parts.append(
                 f"✨ 生成成功！\n📊 耗时: {duration:.2f}s\n🖼️ 数量: {len(result.images)}张"
+            )
+
+        if self.show_model_info and self.adapter_config:
+            info_parts.append(
+                f"🤖 模型: {self.adapter_config.name}/{self.adapter_config.model}"
             )
 
         if self.enable_daily_limit:

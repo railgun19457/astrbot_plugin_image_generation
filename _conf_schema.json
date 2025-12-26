@@ -5,61 +5,225 @@
     "type": "bool",
     "default": true
   },
-  "adapter": {
-    "description": "适配器配置",
-    "hint": "图像生成适配器的连接配置",
-    "type": "object",
-    "items": {
-      "type": {
-        "description": "适配器类型",
-        "hint": "选择要使用的图像生成接口",
-        "type": "string",
-        "default": "gemini",
-        "options": [
-          "gemini",
-          "gemini(OpenAI)",
-          "gemini(Zai)",
-          "openai",
-          "z-image(gitee)",
-          "jimeng2api"
-        ]
+  "api_providers": {
+    "type": "template_list",
+    "description": "API 供应商配置",
+    "hint": "配置多个图像生成 API 供应商",
+    "templates": {
+      "gemini": {
+        "name": "Gemini 接口",
+        "hint": "使用 Gemini 的图像生成接口",
+        "items": {
+          "name":{
+            "description": "适配器名称",
+            "hint": "用于区分不同适配器的名称,生图模型格式为 '适配器名称/模型名称'",
+            "type": "string",
+            "default": ""
+          },
+          "provider_id": {
+            "description": "选择提供商",
+            "hint": "从系统已配置的提供商中选择一个用于图像生成",
+            "type": "string",
+            "default": "",
+            "_special": "select_provider"
+          },
+          "base_url": {
+            "description": "API Base URL",
+            "hint": "仅在未选择系统提供商时需要填写",
+            "type": "string",
+            "default": ""
+          },
+          "proxy": {
+            "description": "代理地址",
+            "hint": "例如: http://127.0.0.1:7890",
+            "type": "string",
+            "default": ""
+          },
+          "api_keys": {
+            "description": "API Keys",
+            "hint": "仅在未选择系统提供商时需要填写",
+            "type": "list",
+            "default": []
+          },
+          "available_models": {
+            "description": "可用模型列表",
+            "hint": "用于 /生图模型 命令切换时的可选模型。",
+            "type": "list",
+            "default": ["gemini-3-pro-image-preview","gemini-2.5-flash-image","gemini-2.5-flash-image-preview"]
+          }
+        }
       },
-      "provider_id": {
-        "description": "选择提供商",
-        "hint": "从系统已配置的提供商中选择一个用于图像生成",
-        "type": "string",
-        "default": "",
-        "_special": "select_provider"
+      "gemini_openai": {
+        "name": "Gemini OpenAI兼容接口",
+        "hint": "使用兼容Openai格式的 Gemini图像生成接口",
+        "items": {
+          "name":{
+            "description": "适配器名称",
+            "hint": "用于区分不同适配器的名称,生图模型格式为 '适配器名称/模型名称'",
+            "type": "string",
+            "default": ""
+          },
+          "provider_id": {
+            "description": "选择提供商",
+            "hint": "从系统已配置的提供商中选择一个用于图像生成",
+            "type": "string",
+            "default": "",
+            "_special": "select_provider"
+          },
+          "base_url": {
+            "description": "API Base URL",
+            "hint": "仅在未选择系统提供商时需要填写",
+            "type": "string",
+            "default": ""
+          },
+          "proxy": {
+            "description": "代理地址",
+            "hint": "例如: http://127.0.0.1:7890",
+            "type": "string",
+            "default": ""
+          },
+          "api_keys": {
+            "description": "API Keys",
+            "hint": "仅在未选择系统提供商时需要填写",
+            "type": "list",
+            "default": []
+          },
+          "available_models": {
+            "description": "可用模型列表",
+            "hint": "用于 /生图模型 命令切换时的可选模型。",
+            "type": "list",
+            "default": ["gemini-3-pro-image","gemini-2.5-flash-image"]
+          }
+        }
       },
-      "base_url": {
-        "description": "API Base URL",
-        "hint": "仅在未选择系统提供商时需要填写",
-        "type": "string",
-        "default": ""
+      "openai": {
+        "name": "OpenAI 接口",
+        "hint": "使用 OpenAI 的图像生成接口",
+        "items": {
+          "name":{
+            "description": "适配器名称",
+            "hint": "用于区分不同适配器的名称,生图模型格式为 '适配器名称/模型名称'",
+            "type": "string",
+            "default": ""
+          },
+          "provider_id": {
+            "description": "选择提供商",
+            "hint": "从系统已配置的提供商中选择一个用于图像生成",
+            "type": "string",
+            "default": "",
+            "_special": "select_provider"
+          },
+          "base_url": {
+            "description": "API Base URL",
+            "hint": "仅在未选择系统提供商时需要填写",
+            "type": "string",
+            "default": ""
+          },
+          "proxy": {
+            "description": "代理地址",
+            "hint": "例如: http://127.0.0.1:7890",
+            "type": "string",
+            "default": ""
+          },
+          "api_keys": {
+            "description": "API Keys",
+            "hint": "仅在未选择系统提供商时需要填写",
+            "type": "list",
+            "default": []
+          },
+          "available_models": {
+            "description": "可用模型列表",
+            "hint": "用于 /生图模型 命令切换时的可选模型。",
+            "type": "list",
+            "default": ["dall-e-3"]
+          }
+        }
       },
-      "api_keys": {
-        "description": "API Keys",
-        "hint": "仅在未选择系统提供商时需要填写",
-        "type": "list",
-        "default": []
+      "z_image_gitee": {
+        "name": "Z-Image (Gitee) 接口",
+        "hint": "使用Gitee的 Z-Image 图像生成接口",
+        "items": {
+          "name":{
+            "description": "适配器名称",
+            "hint": "用于区分不同适配器的名称,生图模型格式为 '适配器名称/模型名称'",
+            "type": "string",
+            "default": ""
+          },
+          "provider_id": {
+            "description": "选择提供商",
+            "hint": "从系统已配置的提供商中选择一个用于图像生成",
+            "type": "string",
+            "default": "",
+            "_special": "select_provider"
+          },
+          "base_url": {
+            "description": "API Base URL",
+            "hint": "仅在未选择系统提供商时需要填写",
+            "type": "string",
+            "default": ""
+          },
+          "proxy": {
+            "description": "代理地址",
+            "hint": "例如: http://127.0.0.1:7890",
+            "type": "string",
+            "default": ""
+          },
+          "api_keys": {
+            "description": "API Keys",
+            "hint": "仅在未选择系统提供商时需要填写",
+            "type": "list",
+            "default": []
+          },
+          "available_models": {
+            "description": "可用模型列表",
+            "hint": "用于 /生图模型 命令切换时的可选模型。",
+            "type": "list",
+            "default": ["z-image-turbo"]
+          }
+        }
       },
-      "model": {
-        "description": "当前生图模型",
-        "hint": "可以通过 /生图模型 命令切换",
-        "type": "string",
-        "default": ""
-      },
-      "available_models": {
-        "description": "可用模型列表",
-        "hint": "用于 /生图模型 命令切换时的可选模型。",
-        "type": "list",
-        "default": []
-      },
-      "proxy": {
-        "description": "代理地址",
-        "hint": "例如: http://127.0.0.1:7890",
-        "type": "string",
-        "default": ""
+      "jimeng2api": {
+        "name": "即梦逆向生图接口",
+        "hint": "使用[iptag/jimeng-api]项目的图像生成接口",
+        "items": {
+          "name":{
+            "description": "适配器名称",
+            "hint": "用于区分不同适配器的名称,生图模型格式为 '适配器名称/模型名称'",
+            "type": "string",
+            "default": ""
+          },
+          "provider_id": {
+            "description": "选择提供商",
+            "hint": "从系统已配置的提供商中选择一个用于图像生成",
+            "type": "string",
+            "default": "",
+            "_special": "select_provider"
+          },
+          "base_url": {
+            "description": "API Base URL",
+            "hint": "仅在未选择系统提供商时需要填写",
+            "type": "string",
+            "default": ""
+          },
+          "proxy": {
+            "description": "代理地址",
+            "hint": "例如: http://127.0.0.1:7890",
+            "type": "string",
+            "default": ""
+          },
+          "api_keys": {
+            "description": "API Keys",
+            "hint": "仅在未选择系统提供商时需要填写",
+            "type": "list",
+            "default": []
+          },
+          "available_models": {
+            "description": "可用模型列表",
+            "hint": "用于 /生图模型 命令切换时的可选模型。",
+            "type": "list",
+            "default": ["jimeng-4.5","nanobanana"]
+          }
+        }
       }
     }
   },
@@ -68,6 +232,12 @@
     "hint": "图像生成的行为配置",
     "type": "object",
     "items": {
+      "model":{
+        "description": "生图模型",
+        "hint": "可以通过 /生图模型 命令切换,格式为 '适配器名称/模型名称',留空自动使用第一个可用模型",
+        "type": "string",
+        "default": ""
+      },
       "timeout": {
         "description": "生图超时时间（秒）",
         "type": "int",
@@ -80,7 +250,7 @@
       },
       "max_concurrent_tasks": {
         "description": "最大并发任务数",
-        "hint": "同时生成图片的最大数量，防止资源耗尽",
+        "hint": "同时生成图片的最大数量,防止资源耗尽",
         "type": "int",
         "default": 3
       },
@@ -116,7 +286,13 @@
       },
       "show_generation_info": {
         "description": "显示生图信息",
-        "hint": "生图成功后，发送消息展示生图耗时和生成图片数量",
+        "hint": "生图成功后,发送消息展示生图耗时和生成图片数量",
+        "type": "bool",
+        "default": false
+      },
+      "show_model_info": {
+        "description": "显示模型信息",
+        "hint": "生图成功后,发送消息展示所使用的模型名称",
         "type": "bool",
         "default": false
       }
@@ -129,13 +305,13 @@
     "items": {
       "rate_limit_seconds": {
         "description": "速率限制（秒）",
-        "hint": "单个用户两次请求之间的最小间隔时间，0 表示不限制",
+        "hint": "单个用户两次请求之间的最小间隔时间,0 表示不限制",
         "type": "int",
         "default": 0
       },
       "max_image_size_mb": {
         "description": "最大图片限制 (MB)",
-        "hint": "允许上传的参考图最大大小，超过此大小的图片将被忽略",
+        "hint": "允许上传的参考图最大大小,超过此大小的图片将被忽略",
         "type": "int",
         "default": 10
       },

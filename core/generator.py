@@ -5,7 +5,6 @@ from astrbot.api import logger
 from ..adapter import (
     GeminiAdapter,
     GeminiOpenAIAdapter,
-    GeminiZaiAdapter,
     Jimeng2APIAdapter,
     OpenAIAdapter,
     ZImageAdapter,
@@ -32,7 +31,6 @@ class ImageGenerator:
         adapter_map: dict[AdapterType, type] = {
             AdapterType.GEMINI: GeminiAdapter,
             AdapterType.GEMINI_OPENAI: GeminiOpenAIAdapter,
-            AdapterType.GEMINI_ZAI: GeminiZaiAdapter,
             AdapterType.OPENAI: OpenAIAdapter,
             AdapterType.Z_IMAGE: ZImageAdapter,
             AdapterType.JIMENG2API: Jimeng2APIAdapter,

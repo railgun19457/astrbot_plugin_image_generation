@@ -8,10 +8,9 @@ class AdapterType(str, enum.Enum):
     """支持的图像生成适配器类型。"""
 
     GEMINI = "gemini"
-    GEMINI_OPENAI = "gemini(OpenAI)"
-    GEMINI_ZAI = "gemini(Zai)"
+    GEMINI_OPENAI = "gemini_openai"
     OPENAI = "openai"
-    Z_IMAGE = "z-image(gitee)"
+    Z_IMAGE = "z_image_gitee"
     JIMENG2API = "jimeng2api"
 
 
@@ -38,6 +37,7 @@ class AdapterConfig:
     """构造适配器所需的配置。"""
 
     type: AdapterType = AdapterType.GEMINI
+    name: str = ""  # 供应商展示名称
     base_url: str | None = None
     api_keys: list[str] = field(default_factory=list)
     model: str = ""
