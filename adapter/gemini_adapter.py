@@ -35,7 +35,7 @@ class GeminiAdapter(BaseImageAdapter):
         for attempt in range(self.max_retry_attempts):
             if attempt:
                 logger.info(
-                    f"[ImageGen] 重试 Gemini ({attempt + 1}/{self.max_retry_attempts})"
+                    f"{self._get_log_prefix(request.task_id)} 重试 ({attempt + 1}/{self.max_retry_attempts})"
                 )
 
             images, err = await self._generate_once(request)
@@ -127,10 +127,9 @@ class GeminiAdapter(BaseImageAdapter):
         url = f"{self.base_url or self.DEFAULT_BASE_URL}/v1beta/models/{self.model}:generateContent"
         api_key = self._get_current_api_key()
         masked_key = api_key[:4] + "****" + api_key[-4:] if len(api_key) > 8 else "****"
-        prefix = f"[{task_id}] " if task_id else ""
-        adapter_name = self.__class__.__name__.replace("Adapter", "")
+        prefix = self._get_log_prefix(task_id)
         logger.debug(
-            f"[ImageGen] {prefix}{adapter_name} 请求 -> {url}, key={masked_key}"
+            f"{prefix} 请求 -> {url}, key={masked_key}"
         )
 
         headers = {
@@ -148,7 +147,7 @@ class GeminiAdapter(BaseImageAdapter):
             ) as response:
                 duration = time.time() - start_time
                 logger.debug(
-                    f"[ImageGen] {prefix}{adapter_name} 状态 -> {response.status} (耗时: {duration:.2f}s)"
+                    f"{prefix} 状态 -> {response.status} (耗时: {duration:.2f}s)"
                 )
                 if response.status != 200:
                     error_text = await response.text()
@@ -158,14 +157,14 @@ class GeminiAdapter(BaseImageAdapter):
                         else error_text
                     )
                     logger.error(
-                        f"[ImageGen] {prefix}{adapter_name} 错误 {response.status} (耗时: {duration:.2f}s): {preview}"
+                        f"{prefix} 错误 {response.status} (耗时: {duration:.2f}s): {preview}"
                     )
                     return None
                 return await response.json()
         except Exception as e:
             duration = time.time() - start_time
             logger.error(
-                f"[ImageGen] {prefix}{adapter_name} 请求异常 (耗时: {duration:.2f}s): {e}"
+                f"{prefix} 请求异常 (耗时: {duration:.2f}s): {e}"
             )
             return None
 
@@ -173,10 +172,10 @@ class GeminiAdapter(BaseImageAdapter):
         self, response: dict, task_id: str | None
     ) -> list[bytes] | None:
         """从响应中提取图像数据。"""
-        prefix = f"[{task_id}] " if task_id else ""
+        prefix = self._get_log_prefix(task_id)
         try:
             candidates = response.get("candidates", [])
-            logger.debug(f"[ImageGen] {prefix}Gemini 候选结果: {len(candidates)}")
+            logger.debug(f"{prefix} 候选结果: {len(candidates)}")
             if not candidates:
                 return None
 
@@ -189,5 +188,5 @@ class GeminiAdapter(BaseImageAdapter):
 
             return images if images else None
         except Exception as exc:  # noqa: BLE001
-            logger.error(f"[ImageGen] Gemini 解析失败: {exc}")
+            logger.error(f"{prefix} 解析失败: {exc}")
             return None

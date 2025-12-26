@@ -116,9 +116,11 @@ class ImageGenerationTool(FunctionTool[AstrAgentContext]):
         # 检查频率限制和每日限制
         check_result = plugin._check_rate_limit(event.unified_msg_origin)
         if isinstance(check_result, str):
+            logger.warning(f"[ImageGen] 工具调用触发限制: {check_result} (用户: {event.unified_msg_origin})")
             return check_result
 
         if not plugin.adapter_config.api_keys:
+            logger.warning(f"[ImageGen] 工具调用失败: 未配置 API Key (用户: {event.unified_msg_origin})")
             return "❌ 未配置 API Key，无法生成图片"
 
         # 工具调用同样支持获取上下文参考图（消息/引用/头像）

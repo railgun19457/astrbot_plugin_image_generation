@@ -32,7 +32,7 @@ class GeminiOpenAIAdapter(BaseImageAdapter):
         for attempt in range(self.max_retry_attempts):
             if attempt:
                 logger.info(
-                    f"[ImageGen] 重试 OpenAI 适配器 ({attempt + 1}/{self.max_retry_attempts})"
+                    f"{self._get_log_prefix(request.task_id)} 重试 ({attempt + 1}/{self.max_retry_attempts})"
                 )
 
             images, err = await self._generate_once(request)
@@ -59,7 +59,7 @@ class GeminiOpenAIAdapter(BaseImageAdapter):
         if response is None:
             return None, "API 请求失败"
 
-        images = await self._extract_images(response)
+        images = await self._extract_images(response, request.task_id)
         if images:
             return images, None
 
@@ -68,7 +68,7 @@ class GeminiOpenAIAdapter(BaseImageAdapter):
             content = response["choices"][0].get("message", {}).get("content")
             if isinstance(content, str) and content.strip():
                 return None, f"未生成图片，API 返回文本: {content[:100]}"
-        return None, "响应中未找到图片数据"
+        return None, "响应中未找到图片 data"
 
     def _build_payload(self, request: GenerationRequest) -> dict:
         """构建请求载荷。"""
@@ -117,10 +117,9 @@ class GeminiOpenAIAdapter(BaseImageAdapter):
         url = f"{self.base_url or self.DEFAULT_BASE_URL}/v1/chat/completions"
         api_key = self._get_current_api_key()
         masked_key = api_key[:4] + "****" + api_key[-4:] if len(api_key) > 8 else "****"
-        prefix = f"[{task_id}] " if task_id else ""
-        adapter_name = self.__class__.__name__.replace("Adapter", "")
+        prefix = self._get_log_prefix(task_id)
         logger.debug(
-            f"[ImageGen] {prefix}{adapter_name} 请求 -> {url}, key={masked_key}"
+            f"{prefix} 请求 -> {url}, key={masked_key}"
         )
 
         headers = {
@@ -138,7 +137,7 @@ class GeminiOpenAIAdapter(BaseImageAdapter):
             ) as response:
                 duration = time.time() - start_time
                 logger.debug(
-                    f"[ImageGen] {prefix}{adapter_name} 状态 -> {response.status} (耗时: {duration:.2f}s)"
+                    f"{prefix} 状态 -> {response.status} (耗时: {duration:.2f}s)"
                 )
                 if response.status != 200:
                     error_text = await response.text()
@@ -148,31 +147,32 @@ class GeminiOpenAIAdapter(BaseImageAdapter):
                         else error_text
                     )
                     logger.error(
-                        f"[ImageGen] {prefix}{adapter_name} 错误 {response.status} (耗时: {duration:.2f}s): {preview}"
+                        f"{prefix} 错误 {response.status} (耗时: {duration:.2f}s): {preview}"
                     )
                     return None
                 return await response.json()
         except Exception as e:
             duration = time.time() - start_time
             logger.error(
-                f"[ImageGen] {prefix}{adapter_name} 请求异常 (耗时: {duration:.2f}s): {e}"
+                f"{prefix} 请求异常 (耗时: {duration:.2f}s): {e}"
             )
             return None
 
-    async def _download_image_from_url(self, url: str) -> bytes | None:
+    async def _download_image_from_url(self, url: str, task_id: str | None = None) -> bytes | None:
         """从 URL 下载图像。"""
+        prefix = self._get_log_prefix(task_id)
         try:
             session = self._get_session()
             async with session.get(url, timeout=30) as response:
                 if response.status == 200:
                     return await response.read()
-                logger.error(f"[ImageGen] 下载图像失败: {response.status} - {url}")
+                logger.error(f"{prefix} 下载图像失败: {response.status} - {url}")
         except Exception as exc:  # noqa: BLE001
-            logger.error(f"[ImageGen] 下载图像出错: {exc}")
+            logger.error(f"{prefix} 下载图像出错: {exc}")
         return None
 
     async def _extract_images(
-        self, response_data: dict[str, Any]
+        self, response_data: dict[str, Any], task_id: str | None = None
     ) -> list[bytes] | None:
         """从响应数据中提取图像。"""
         images: list[bytes] = []
@@ -189,10 +189,10 @@ class GeminiOpenAIAdapter(BaseImageAdapter):
                         pass
                 elif url := item.get("url"):
                     if url.startswith("http"):
-                        if content := await self._download_image_from_url(url):
+                        if content := await self._download_image_from_url(url, task_id):
                             images.append(content)
                     else:
-                        decoded = self._decode_image_url(url)
+                        decoded = self._decode_image_url(url, task_id)
                         if decoded:
                             images.append(decoded)
 
@@ -207,10 +207,10 @@ class GeminiOpenAIAdapter(BaseImageAdapter):
                 markdown_matches = re.findall(r"!\[.*?\]\((.*?)\)", content)
                 for url in markdown_matches:
                     if url.startswith("http"):
-                        if data := await self._download_image_from_url(url):
+                        if data := await self._download_image_from_url(url, task_id):
                             images.append(data)
                     else:
-                        decoded = self._decode_image_url(url)
+                        decoded = self._decode_image_url(url, task_id)
                         if decoded:
                             images.append(decoded)
 
@@ -232,10 +232,10 @@ class GeminiOpenAIAdapter(BaseImageAdapter):
                         if not image_url:
                             continue
                         if image_url.startswith("http"):
-                            if data := await self._download_image_from_url(image_url):
+                            if data := await self._download_image_from_url(image_url, task_id):
                                 images.append(data)
                         else:
-                            decoded = self._decode_image_url(image_url)
+                            decoded = self._decode_image_url(image_url, task_id)
                             if decoded:
                                 images.append(decoded)
 
@@ -251,21 +251,22 @@ class GeminiOpenAIAdapter(BaseImageAdapter):
                     if not url:
                         continue
                     if url.startswith("http"):
-                        if data := await self._download_image_from_url(url):
+                        if data := await self._download_image_from_url(url, task_id):
                             images.append(data)
                     else:
-                        decoded = self._decode_image_url(url)
+                        decoded = self._decode_image_url(url, task_id)
                         if decoded:
                             images.append(decoded)
 
         return images or None
 
-    def _decode_image_url(self, url: str) -> bytes | None:
+    def _decode_image_url(self, url: str, task_id: str | None = None) -> bytes | None:
         """解码 Data URL 形式的图像。"""
         if url.startswith("data:image/") and ";base64," in url:
             try:
                 _, _, data_part = url.partition(";base64,")
                 return base64.b64decode(data_part)
             except Exception as exc:  # noqa: BLE001
-                logger.error(f"[ImageGen] Base64 解码失败: {exc}")
+                prefix = self._get_log_prefix(task_id)
+                logger.error(f"{prefix} Base64 解码失败: {exc}")
         return None

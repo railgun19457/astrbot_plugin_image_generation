@@ -31,7 +31,7 @@ class Jimeng2APIAdapter(BaseImageAdapter):
         for attempt in range(self.max_retry_attempts):
             if attempt:
                 logger.info(
-                    f"[ImageGen] 重试 Jimeng2API 适配器 ({attempt + 1}/{self.max_retry_attempts})"
+                    f"{self._get_log_prefix(request.task_id)} 重试 ({attempt + 1}/{self.max_retry_attempts})"
                 )
 
             images, err = await self._generate_once(request)
@@ -54,13 +54,14 @@ class Jimeng2APIAdapter(BaseImageAdapter):
         """执行单次生图请求。"""
         start_time = time.time()
         session = self._get_session()
+        prefix = self._get_log_prefix(request.task_id)
 
         prompt_text = request.prompt
         if prompt_text is None:
             return None, "缺少提示词"
         if not isinstance(prompt_text, str):
             logger.warning(
-                f"[ImageGen] Jimeng2API prompt 非字符串类型: {type(prompt_text)}"
+                f"{prefix} prompt 非字符串类型: {type(prompt_text)}"
             )
             prompt_text = str(prompt_text)
 
@@ -102,19 +103,18 @@ class Jimeng2APIAdapter(BaseImageAdapter):
                     timeout=self.timeout,
                 ) as resp:
                     duration = time.time() - start_time
-                    adapter_name = self.__class__.__name__.replace("Adapter", "")
                     if resp.status != 200:
                         error_text = await resp.text()
                         logger.error(
-                            f"[ImageGen] {adapter_name} Compositions 错误 ({resp.status}, 耗时: {duration:.2f}s): {error_text}"
+                            f"{prefix} Compositions 错误 ({resp.status}, 耗时: {duration:.2f}s): {error_text}"
                         )
                         return None, f"API 错误 ({resp.status})"
 
                     data_json = await resp.json()
                     logger.info(
-                        f"[ImageGen] {adapter_name} Compositions 成功 (耗时: {duration:.2f}s)"
+                        f"{prefix} Compositions 成功 (耗时: {duration:.2f}s)"
                     )
-                    return await self._extract_images(data_json)
+                    return await self._extract_images(data_json, request.task_id)
             else:
                 # 文生图
                 url = f"{base_url.rstrip('/')}/v1/images/generations"
@@ -141,32 +141,31 @@ class Jimeng2APIAdapter(BaseImageAdapter):
                     timeout=self.timeout,
                 ) as resp:
                     duration = time.time() - start_time
-                    adapter_name = self.__class__.__name__.replace("Adapter", "")
                     if resp.status != 200:
                         error_text = await resp.text()
                         logger.error(
-                            f"[ImageGen] {adapter_name} Generations 错误 ({resp.status}, 耗时: {duration:.2f}s): {error_text}"
+                            f"{prefix} Generations 错误 ({resp.status}, 耗时: {duration:.2f}s): {error_text}"
                         )
                         return None, f"API 错误 ({resp.status})"
 
                     data_json = await resp.json()
                     logger.info(
-                        f"[ImageGen] {adapter_name} Generations 成功 (耗时: {duration:.2f}s)"
+                        f"{prefix} Generations 成功 (耗时: {duration:.2f}s)"
                     )
-                    return await self._extract_images(data_json)
+                    return await self._extract_images(data_json, request.task_id)
 
         except Exception as e:
             duration = time.time() - start_time
-            adapter_name = self.__class__.__name__.replace("Adapter", "")
             logger.error(
-                f"[ImageGen] {adapter_name} 请求异常 (耗时: {duration:.2f}s): {e}"
+                f"{prefix} 请求异常 (耗时: {duration:.2f}s): {e}"
             )
             return None, str(e)
 
     async def _extract_images(
-        self, response: dict
+        self, response: dict, task_id: str | None = None
     ) -> tuple[list[bytes] | None, str | None]:
         """从响应中提取图片数据。"""
+        prefix = self._get_log_prefix(task_id)
         if "data" not in response:
             return None, "响应中未找到 data 字段"
 
@@ -180,6 +179,8 @@ class Jimeng2APIAdapter(BaseImageAdapter):
                 ) as resp:
                     if resp.status == 200:
                         images.append(await resp.read())
+                    else:
+                        logger.error(f"{prefix} 下载图像失败 ({resp.status}): {item['url']}")
 
         if not images:
             return None, "未找到有效的图片数据"

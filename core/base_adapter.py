@@ -47,11 +47,19 @@ class BaseImageAdapter(abc.ABC):
             return ""
         return self.api_keys[self.current_key_index % len(self.api_keys)]
 
+    def _get_log_prefix(self, task_id: str | None = None) -> str:
+        """获取统一的日志前缀。"""
+        adapter_name = self.__class__.__name__.replace("Adapter", "")
+        prefix = f"[ImageGen] [{adapter_name}]"
+        if task_id:
+            prefix += f" [{task_id}]"
+        return prefix
+
     def _rotate_api_key(self) -> None:
         """轮换 API Key。"""
         if len(self.api_keys) > 1:
             self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
-            logger.info(f"[ImageGen] 轮换 API Key -> 索引 {self.current_key_index}")
+            logger.info(f"{self._get_log_prefix()} 轮换 API Key -> 索引 {self.current_key_index}")
 
     def update_model(self, model: str) -> None:
         """更新使用的模型。"""

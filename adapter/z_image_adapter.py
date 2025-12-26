@@ -32,15 +32,16 @@ class ZImageAdapter(BaseImageAdapter):
                 images=None, error="Z-Image 适配器目前仅支持文生图，请勿上传图片。"
             )
 
+        prefix = self._get_log_prefix(request.task_id)
         logger.info(
-            f"[ImageGen] Z-Image 开始生成: prompt='{request.prompt[:50]}...', model='{self.model or 'z-image-turbo'}'"
+            f"{prefix} 开始生成: prompt='{request.prompt[:50]}...', model='{self.model or 'z-image-turbo'}'"
         )
 
         last_error = "未配置 API Key"
         for attempt in range(self.max_retry_attempts):
             if attempt:
                 logger.info(
-                    f"[ImageGen] 重试 Z-Image 适配器 ({attempt + 1}/{self.max_retry_attempts})"
+                    f"{prefix} 重试 ({attempt + 1}/{self.max_retry_attempts})"
                 )
 
             images, err = await self._generate_once(request)
@@ -64,13 +65,14 @@ class ZImageAdapter(BaseImageAdapter):
         start_time = time.time()
         payload = self._build_payload(request)
         session = self._get_session()
+        prefix = self._get_log_prefix(request.task_id)
 
         if not self.base_url:
             url = "https://ai.gitee.com/v1/images/generations"
         else:
             url = f"{self.base_url.rstrip('/')}/v1/images/generations"
 
-        logger.debug(f"[ImageGen] Z-Image 请求 URL: {url}, Payload: {payload.keys()}")
+        logger.debug(f"{prefix} 请求 URL: {url}, Payload 字段: {list(payload.keys())}")
 
         headers = {
             "Authorization": f"Bearer {self._get_current_api_key()}",
@@ -87,29 +89,28 @@ class ZImageAdapter(BaseImageAdapter):
                 timeout=self.timeout,
             ) as resp:
                 duration = time.time() - start_time
-                adapter_name = self.__class__.__name__.replace("Adapter", "")
                 if resp.status != 200:
                     error_text = await resp.text()
                     logger.error(
-                        f"[ImageGen] {adapter_name} API 错误 ({resp.status}, 耗时: {duration:.2f}s): {error_text}"
+                        f"{prefix} API 错误 ({resp.status}, 耗时: {duration:.2f}s): {error_text}"
                     )
                     return None, f"API 错误 ({resp.status})"
 
                 data = await resp.json()
                 logger.info(
-                    f"[ImageGen] {adapter_name} 生成成功 (耗时: {duration:.2f}s)"
+                    f"{prefix} 生成成功 (耗时: {duration:.2f}s)"
                 )
-                return await self._extract_images(data)
+                return await self._extract_images(data, request.task_id)
         except Exception as e:
             duration = time.time() - start_time
-            adapter_name = self.__class__.__name__.replace("Adapter", "")
             logger.error(
-                f"[ImageGen] {adapter_name} 请求异常 (耗时: {duration:.2f}s): {e}"
+                f"{prefix} 请求异常 (耗时: {duration:.2f}s): {e}"
             )
             return None, str(e)
 
     def _build_payload(self, request: GenerationRequest) -> dict:
         """构建请求载荷。"""
+        prefix = self._get_log_prefix(request.task_id)
         # Gitee z-image-turbo 常用参数
         # 1K 分辨率映射
         res_1k = {
@@ -145,8 +146,8 @@ class ZImageAdapter(BaseImageAdapter):
         else:
             size = res_1k.get(aspect_ratio, "1024x1024")
 
-        logger.info(
-            f"[ImageGen] Z-Image 参数: size={size}, aspect_ratio={aspect_ratio}, resolution={request.resolution or '1K'}"
+        logger.debug(
+            f"{prefix} 参数: size={size}, aspect_ratio={aspect_ratio}, resolution={request.resolution or '1K'}"
         )
 
         payload: dict[str, Any] = {
@@ -159,9 +160,10 @@ class ZImageAdapter(BaseImageAdapter):
         return payload
 
     async def _extract_images(
-        self, data: dict
+        self, data: dict, task_id: str | None = None
     ) -> tuple[list[bytes] | None, str | None]:
         """从 API 响应中提取图像数据。"""
+        prefix = self._get_log_prefix(task_id)
         # Gitee 的响应格式通常遵循 OpenAI 规范
         if "data" not in data:
             return None, f"响应格式错误: {data}"
@@ -172,29 +174,30 @@ class ZImageAdapter(BaseImageAdapter):
                 images.append(base64.b64decode(item["b64_json"]))
             elif "url" in item:
                 # 如果返回的是 URL，需要下载
-                logger.debug(f"[ImageGen] Z-Image 正在下载图像: {item['url'][:50]}...")
-                img_bytes = await self._download_image(item["url"])
+                logger.debug(f"{prefix} 正在下载图像: {item['url'][:50]}...")
+                img_bytes = await self._download_image(item["url"], task_id)
                 if img_bytes:
                     images.append(img_bytes)
             else:
-                logger.warning(f"[ImageGen] 无法从响应项中提取图像: {item}")
+                logger.warning(f"{prefix} 无法从响应项中提取图像: {item}")
 
         if not images:
             return None, "未生成任何图像"
 
-        logger.info(f"[ImageGen] Z-Image 成功提取 {len(images)} 张图像")
+        logger.info(f"{prefix} 成功提取 {len(images)} 张图像")
         return images, None
 
-    async def _download_image(self, url: str) -> bytes | None:
+    async def _download_image(self, url: str, task_id: str | None = None) -> bytes | None:
         """下载图像。"""
         session = self._get_session()
+        prefix = self._get_log_prefix(task_id)
         try:
             async with session.get(url, proxy=self.proxy, timeout=30) as resp:
                 if resp.status == 200:
                     data = await resp.read()
-                    logger.debug(f"[ImageGen] Z-Image 图像下载成功: {len(data)} bytes")
+                    logger.debug(f"{prefix} 图像下载成功: {len(data)} bytes")
                     return data
-                logger.error(f"[ImageGen] 下载图像失败 ({resp.status}): {url}")
+                logger.error(f"{prefix} 下载图像失败 ({resp.status}): {url}")
         except Exception as e:
-            logger.error(f"[ImageGen] 下载图像异常: {e}")
+            logger.error(f"{prefix} 下载图像异常: {e}")
         return None
