@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import re
 import time
@@ -11,43 +10,20 @@ import aiohttp
 from astrbot.api import logger
 
 from ..core.base_adapter import BaseImageAdapter
-from ..core.types import GenerationRequest, GenerationResult, ImageCapability
+from ..core.constants import GEMINI_DEFAULT_BASE_URL
+from ..core.types import GenerationRequest, ImageCapability
 
 
 class GeminiOpenAIAdapter(BaseImageAdapter):
     """通过 OpenAI 兼容的聊天补全接口进行 Gemini 图像生成。"""
 
-    DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
+    DEFAULT_BASE_URL = GEMINI_DEFAULT_BASE_URL
 
     def get_capabilities(self) -> ImageCapability:
         """获取适配器支持的功能。"""
         return ImageCapability.TEXT_TO_IMAGE | ImageCapability.IMAGE_TO_IMAGE
 
-    async def generate(self, request: GenerationRequest) -> GenerationResult:
-        """执行生图逻辑。"""
-        if not self.api_keys:
-            return GenerationResult(images=None, error="未配置 API Key")
-
-        last_error = "未配置 API Key"
-        for attempt in range(self.max_retry_attempts):
-            if attempt:
-                logger.info(
-                    f"{self._get_log_prefix(request.task_id)} 重试 ({attempt + 1}/{self.max_retry_attempts})"
-                )
-
-            images, err = await self._generate_once(request)
-            if images is not None:
-                return GenerationResult(images=images, error=None)
-
-            last_error = err or "生成失败"
-            if attempt < self.max_retry_attempts - 1:
-                self._rotate_api_key()
-                if (attempt + 1) % max(1, len(self.api_keys)) == 0:
-                    await asyncio.sleep(
-                        min(2 ** ((attempt + 1) // len(self.api_keys)), 10)
-                    )
-
-        return GenerationResult(images=None, error=f"重试失败: {last_error}")
+    # generate() 方法由基类提供，使用模板方法模式
 
     async def _generate_once(
         self, request: GenerationRequest
@@ -176,6 +152,7 @@ class GeminiOpenAIAdapter(BaseImageAdapter):
     ) -> list[bytes] | None:
         """从响应数据中提取图像。"""
         images: list[bytes] = []
+        prefix = self._get_log_prefix(task_id)
 
         # DALL-E 风格
         if isinstance(response_data.get("data"), list):
@@ -185,8 +162,8 @@ class GeminiOpenAIAdapter(BaseImageAdapter):
                 if b64 := item.get("b64_json"):
                     try:
                         images.append(base64.b64decode(b64))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"{prefix} Base64 解码失败 (b64_json): {e}")
                 elif url := item.get("url"):
                     if url.startswith("http"):
                         if content := await self._download_image_from_url(url, task_id):
@@ -222,8 +199,8 @@ class GeminiOpenAIAdapter(BaseImageAdapter):
                 for _, b64_str in pattern.findall(content_without_md):
                     try:
                         images.append(base64.b64decode(b64_str))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"{prefix} Base64 解码失败 (inline): {e}")
 
             elif isinstance(content, list):
                 for part in content:

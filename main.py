@@ -216,7 +216,6 @@ class ImageGenerationPlugin(Star):
         self.adapter_config: AdapterConfig | None = None
         self.generator: ImageGenerator | None = None
         self.task_manager = TaskManager()
-        self.task_manager = TaskManager()
 
         # 用于频率限制
         self.user_request_timestamps: dict[str, float] = {}
@@ -256,8 +255,6 @@ class ImageGenerationPlugin(Star):
             self.context.add_llm_tools(tool)
             logger.info("[ImageGen] 已注册图像生成工具")
 
-        # 启动定时任务
-        self._setup_tasks()
         # 启动定时任务
         self._setup_tasks()
 
@@ -347,12 +344,14 @@ class ImageGenerationPlugin(Star):
         # 按数量清理
         if len(files) > self.max_cache_count:
             to_delete = files[: len(files) - self.max_cache_count]
+            deleted_count = 0
             for path, _ in to_delete:
                 try:
                     os.remove(path)
-                except Exception:
-                    pass
-            logger.info(f"[ImageGen] 已清理 {len(to_delete)} 个旧缓存文件 (按数量)")
+                    deleted_count += 1
+                except OSError as e:
+                    logger.debug(f"[ImageGen] 删除缓存文件失败: {path} - {e}")
+            logger.info(f"[ImageGen] 已清理 {deleted_count}/{len(to_delete)} 个旧缓存文件 (按数量)")
 
     def _adjust_tool_parameters(self, tool: ImageGenerationTool):
         """根据适配器能力动态调整工具参数。"""
@@ -841,8 +840,6 @@ class ImageGenerationPlugin(Star):
     def create_background_task(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task:
         """创建后台任务并添加到管理器中。"""
         return self.task_manager.create_task(coro)
-        """创建后台任务并添加到管理器中。"""
-        return self.task_manager.create_task(coro)
 
     async def get_avatar(self, user_id: str) -> bytes | None:
         """获取用户头像。"""
@@ -855,8 +852,8 @@ class ImageGenerationPlugin(Star):
             if path:
                 with open(path, "rb") as f:
                     return f.read()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[ImageGen] 获取头像失败 (user_id={user_id}): {e}")
         return None
 
     async def _download_image(self, url: str) -> tuple[bytes, str] | None:
@@ -1045,7 +1042,6 @@ class ImageGenerationPlugin(Star):
         try:
             if self.generator:
                 await self.generator.close()
-            await self.task_manager.cancel_all()
             await self.task_manager.cancel_all()
             logger.info("[ImageGen] 插件已卸载")
         except Exception as exc:

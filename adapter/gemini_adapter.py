@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import time
 
@@ -9,13 +8,14 @@ import aiohttp
 from astrbot.api import logger
 
 from ..core.base_adapter import BaseImageAdapter
-from ..core.types import GenerationRequest, GenerationResult, ImageCapability
+from ..core.constants import GEMINI_DEFAULT_BASE_URL, GEMINI_SAFETY_CATEGORIES
+from ..core.types import GenerationRequest, ImageCapability
 
 
 class GeminiAdapter(BaseImageAdapter):
     """Gemini 原生图像生成适配器。"""
 
-    DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
+    DEFAULT_BASE_URL = GEMINI_DEFAULT_BASE_URL
 
     def get_capabilities(self) -> ImageCapability:
         """获取适配器支持的功能。"""
@@ -26,32 +26,7 @@ class GeminiAdapter(BaseImageAdapter):
             | ImageCapability.RESOLUTION
         )
 
-    async def generate(self, request: GenerationRequest) -> GenerationResult:
-        """执行生图逻辑。"""
-        if not self.api_keys:
-            return GenerationResult(images=None, error="未配置 API Key")
-
-        last_error = "未配置 API Key"
-        for attempt in range(self.max_retry_attempts):
-            if attempt:
-                logger.info(
-                    f"{self._get_log_prefix(request.task_id)} 重试 ({attempt + 1}/{self.max_retry_attempts})"
-                )
-
-            images, err = await self._generate_once(request)
-            if images is not None:
-                return GenerationResult(images=images, error=None)
-
-            last_error = err or "生成失败"
-            if attempt < self.max_retry_attempts - 1:
-                self._rotate_api_key()
-                # 轮换 Key 时进行简单的退避
-                if (attempt + 1) % max(1, len(self.api_keys)) == 0:
-                    await asyncio.sleep(
-                        min(2 ** ((attempt + 1) // len(self.api_keys)), 10)
-                    )
-
-        return GenerationResult(images=None, error=f"重试失败: {last_error}")
+    # generate() 方法由基类提供，使用模板方法模式
 
     async def _generate_once(
         self, request: GenerationRequest
@@ -84,13 +59,7 @@ class GeminiAdapter(BaseImageAdapter):
 
         safety_settings = []
         if self.safety_settings:
-            for category in [
-                "HARM_CATEGORY_HARASSMENT",
-                "HARM_CATEGORY_HATE_SPEECH",
-                "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                "HARM_CATEGORY_DANGEROUS_CONTENT",
-                "HARM_CATEGORY_CIVIC_INTEGRITY",
-            ]:
+            for category in GEMINI_SAFETY_CATEGORIES:
                 safety_settings.append(
                     {"category": category, "threshold": self.safety_settings}
                 )

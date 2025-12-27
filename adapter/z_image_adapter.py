@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import time
 from typing import Any
@@ -8,11 +7,14 @@ from typing import Any
 from astrbot.api import logger
 
 from ..core.base_adapter import BaseImageAdapter
+from ..core.constants import GITEE_AI_DEFAULT_BASE_URL, RESOLUTION_1K_MAP, RESOLUTION_2K_MAP
 from ..core.types import GenerationRequest, GenerationResult, ImageCapability
 
 
 class ZImageAdapter(BaseImageAdapter):
     """Gitee AI 图像生成适配器 (z-image-turbo)。"""
+
+    DEFAULT_BASE_URL = GITEE_AI_DEFAULT_BASE_URL
 
     def get_capabilities(self) -> ImageCapability:
         """获取适配器支持的功能。"""
@@ -22,11 +24,10 @@ class ZImageAdapter(BaseImageAdapter):
             | ImageCapability.ASPECT_RATIO
         )
 
-    async def generate(self, request: GenerationRequest) -> GenerationResult:
-        """执行生图逻辑。"""
-        if not self.api_keys:
-            return GenerationResult(images=None, error="未配置 API Key")
+    # generate() 方法由基类提供，使用模板方法模式
 
+    def _pre_generate(self, request: GenerationRequest) -> GenerationResult | None:
+        """Z-Image 不支持参考图，在生成前进行检查。"""
         if request.images:
             return GenerationResult(
                 images=None, error="Z-Image 适配器目前仅支持文生图，请勿上传图片。"
@@ -36,27 +37,7 @@ class ZImageAdapter(BaseImageAdapter):
         logger.info(
             f"{prefix} 开始生成: prompt='{request.prompt[:50]}...', model='{self.model or 'z-image-turbo'}'"
         )
-
-        last_error = "未配置 API Key"
-        for attempt in range(self.max_retry_attempts):
-            if attempt:
-                logger.info(
-                    f"{prefix} 重试 ({attempt + 1}/{self.max_retry_attempts})"
-                )
-
-            images, err = await self._generate_once(request)
-            if images is not None:
-                return GenerationResult(images=images, error=None)
-
-            last_error = err or "生成失败"
-            if attempt < self.max_retry_attempts - 1:
-                self._rotate_api_key()
-                if (attempt + 1) % max(1, len(self.api_keys)) == 0:
-                    await asyncio.sleep(
-                        min(2 ** ((attempt + 1) // len(self.api_keys)), 10)
-                    )
-
-        return GenerationResult(images=None, error=f"重试失败: {last_error}")
+        return None
 
     async def _generate_once(
         self, request: GenerationRequest
@@ -67,10 +48,8 @@ class ZImageAdapter(BaseImageAdapter):
         session = self._get_session()
         prefix = self._get_log_prefix(request.task_id)
 
-        if not self.base_url:
-            url = "https://ai.gitee.com/v1/images/generations"
-        else:
-            url = f"{self.base_url.rstrip('/')}/v1/images/generations"
+        base = self.base_url or self.DEFAULT_BASE_URL
+        url = f"{base.rstrip('/')}/v1/images/generations"
 
         logger.debug(f"{prefix} 请求 URL: {url}, Payload 字段: {list(payload.keys())}")
 
@@ -111,40 +90,17 @@ class ZImageAdapter(BaseImageAdapter):
     def _build_payload(self, request: GenerationRequest) -> dict:
         """构建请求载荷。"""
         prefix = self._get_log_prefix(request.task_id)
-        # Gitee z-image-turbo 常用参数
-        # 1K 分辨率映射
-        res_1k = {
-            "1:1": "1024x1024",
-            "4:3": "1024x768",
-            "3:4": "768x1024",
-            "16:9": "1024x576",
-            "9:16": "576x1024",
-            "3:2": "1024x640",
-            "2:3": "640x1024",
-        }
-        # 2K 分辨率映射
-        res_2k = {
-            "1:1": "2048x2048",
-            "4:3": "2048x1536",
-            "3:4": "1536x2048",
-            "3:2": "2048x1360",
-            "2:3": "1360x2048",
-            "16:9": "2048x1152",
-            "9:16": "1152x2048",
-        }
 
         size = "1024x1024"
         aspect_ratio = request.aspect_ratio or "1:1"
         if aspect_ratio == "自动":
             aspect_ratio = "1:1"
 
-        if request.resolution == "2K":
-            size = res_2k.get(aspect_ratio, "2048x2048")
-        elif request.resolution == "4K":
-            # 4K 暂时沿用 2K 的逻辑或默认，因为图片中未给出 4K 映射
-            size = res_2k.get(aspect_ratio, "2048x2048")
+        if request.resolution in ("2K", "4K"):
+            # 4K 暂时沿用 2K 的逻辑，因为 API 未提供 4K 映射
+            size = RESOLUTION_2K_MAP.get(aspect_ratio, "2048x2048")
         else:
-            size = res_1k.get(aspect_ratio, "1024x1024")
+            size = RESOLUTION_1K_MAP.get(aspect_ratio, "1024x1024")
 
         logger.debug(
             f"{prefix} 参数: size={size}, aspect_ratio={aspect_ratio}, resolution={request.resolution or '1K'}"

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import time
 from typing import Any
@@ -23,31 +22,7 @@ class Jimeng2APIAdapter(BaseImageAdapter):
             | ImageCapability.ASPECT_RATIO
         )
 
-    async def generate(self, request: GenerationRequest) -> GenerationResult:
-        """执行生图逻辑。"""
-        if not self.api_keys:
-            return GenerationResult(images=None, error="未配置 API Key")
-
-        last_error = "未配置 API Key"
-        for attempt in range(self.max_retry_attempts):
-            if attempt:
-                logger.info(
-                    f"{self._get_log_prefix(request.task_id)} 重试 ({attempt + 1}/{self.max_retry_attempts})"
-                )
-
-            images, err = await self._generate_once(request)
-            if images is not None:
-                return GenerationResult(images=images, error=None)
-
-            last_error = err or "生成失败"
-            if attempt < self.max_retry_attempts - 1:
-                self._rotate_api_key()
-                if (attempt + 1) % max(1, len(self.api_keys)) == 0:
-                    await asyncio.sleep(
-                        min(2 ** ((attempt + 1) // len(self.api_keys)), 10)
-                    )
-
-        return GenerationResult(images=None, error=f"重试失败: {last_error}")
+    # generate() 方法由基类提供，使用模板方法模式
 
     async def _generate_once(
         self, request: GenerationRequest
