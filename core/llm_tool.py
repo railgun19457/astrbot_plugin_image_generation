@@ -81,17 +81,11 @@ class ImageGenerationTool(FunctionTool[AstrAgentContext]):
         # 获取提示词
         prompt = kwargs.get("prompt", "").strip()
         if not prompt:
-            return ToolExecResult(
-                summary="未提供提示词", success=False, error="请提供图片生成的提示词"
-            )
+            return "❌ 请提供图片生成的提示词"
 
         plugin = self.plugin
         if not plugin:
-            return ToolExecResult(
-                summary="插件实例缺失",
-                success=False,
-                error="❌ 插件未正确初始化 (Plugin instance missing)",
-            )
+            return "❌ 插件未正确初始化 (Plugin instance missing)"
 
         # 获取事件上下文
         event = None
@@ -106,11 +100,7 @@ class ImageGenerationTool(FunctionTool[AstrAgentContext]):
             logger.warning(
                 f"[ImageGen] 工具调用上下文缺少事件。上下文类型: {type(context)}"
             )
-            return ToolExecResult(
-                summary="无法获取上下文",
-                success=False,
-                error="❌ 无法获取当前消息上下文",
-            )
+            return "❌ 无法获取当前消息上下文"
 
         # 检查频率限制和每日限制
         check_result = plugin.usage_manager.check_rate_limit(event.unified_msg_origin)
@@ -118,7 +108,7 @@ class ImageGenerationTool(FunctionTool[AstrAgentContext]):
             logger.warning(
                 f"[ImageGen] 工具调用触发限制: {check_result} (用户: {event.unified_msg_origin})"
             )
-            return ToolExecResult(summary="触发限制", success=False, error=check_result)
+            return check_result
 
         if (
             not plugin.config_manager.adapter_config
@@ -127,11 +117,7 @@ class ImageGenerationTool(FunctionTool[AstrAgentContext]):
             logger.warning(
                 f"[ImageGen] 工具调用失败: 未配置 API Key (用户: {event.unified_msg_origin})"
             )
-            return ToolExecResult(
-                summary="配置缺失",
-                success=False,
-                error="❌ 未配置 API Key，无法生成图片",
-            )
+            return "❌ 未配置 API Key，无法生成图片"
 
         # 工具调用同样支持获取上下文参考图（消息/引用/头像）
         images_data = []
@@ -199,11 +185,7 @@ class ImageGenerationTool(FunctionTool[AstrAgentContext]):
         )
 
         mode = "图生图" if images_data else "文生图"
-        return ToolExecResult(
-            summary=f"已启动{mode}任务",
-            success=True,
-            data={"task_id": task_id, "mode": mode},
-        )
+        return f"✅ 已启动{mode}任务 (任务ID: {task_id})"
 
 
 def adjust_tool_parameters(
