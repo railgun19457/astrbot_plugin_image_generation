@@ -24,6 +24,7 @@ from astrbot.core.utils.io import download_image_by_url
 
 from .core.generator import ImageGenerator
 from .core.task_manager import TaskManager
+from .core.task_manager import TaskManager
 from .core.types import (
     AdapterConfig,
     AdapterType,
@@ -216,6 +217,7 @@ class ImageGenerationPlugin(Star):
         self.adapter_config: AdapterConfig | None = None
         self.generator: ImageGenerator | None = None
         self.task_manager = TaskManager()
+        self.task_manager = TaskManager()
 
         # 用于频率限制
         self.user_request_timestamps: dict[str, float] = {}
@@ -255,6 +257,8 @@ class ImageGenerationPlugin(Star):
             self.context.add_llm_tools(tool)
             logger.info("[ImageGen] 已注册图像生成工具")
 
+        # 启动定时任务
+        self._setup_tasks()
         # 启动定时任务
         self._setup_tasks()
 
@@ -838,6 +842,8 @@ class ImageGenerationPlugin(Star):
     def create_background_task(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task:
         """创建后台任务并添加到管理器中。"""
         return self.task_manager.create_task(coro)
+        """创建后台任务并添加到管理器中。"""
+        return self.task_manager.create_task(coro)
 
     async def get_avatar(self, user_id: str) -> bytes | None:
         """获取用户头像。"""
@@ -1040,6 +1046,7 @@ class ImageGenerationPlugin(Star):
         try:
             if self.generator:
                 await self.generator.close()
+            await self.task_manager.cancel_all()
             await self.task_manager.cancel_all()
             logger.info("[ImageGen] 插件已卸载")
         except Exception as exc:
